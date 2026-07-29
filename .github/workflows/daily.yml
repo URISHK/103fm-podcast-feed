@@ -1,0 +1,39 @@
+name: Update Podcast Feed
+
+on:
+  schedule:
+    # Sunday-Thursday at 10:00 UTC.
+    # In Israel summer time (UTC+3) = 13:00, winter (UTC+2) = 12:00.
+    # Show ends 11:00 IL time, so this leaves ample buffer for episode upload.
+    - cron: '0 10 * * 0-4'
+  workflow_dispatch:  # allow manual trigger from GitHub UI
+
+permissions:
+  contents: write
+
+jobs:
+  update-feed:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Run scraper
+        run: python scrape.py
+
+      - name: Commit and push if changed
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          if [[ -n $(git status --porcelain) ]]; then
+            git add -A
+            git commit -m "Update feed $(date -u +'%Y-%m-%d %H:%M UTC')"
+            git push
+          else
+            echo "No changes to commit"
+          fi

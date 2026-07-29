@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0"
+     xmlns:itunes="http://www.itunes.com/dtds/podcast-1.0.dtd"
+     xmlns:content="http://purl.org/rss/1.0/modules/content/"
+     xmlns:atom="http://www.w3.org/2005/Atom">
+  <channel>
+    <title>ינון מגל ובן כספית - 103FM</title>
+    <link>https://103fm.maariv.co.il/program/ינון-מגל-בן-כספית.aspx</link>
+    <description>התוכנית היומית המלאה של ינון מגל ובן כספית ברדיו 103FM. פיד אישי.</description>
+    <language>he</language>
+    <lastBuildDate>Wed, 29 Jul 2026 19:45:57 +0000</lastBuildDate>
+    <itunes:author>103FM</itunes:author>
+    <itunes:summary>התוכנית היומית המלאה של ינון מגל ובן כספית ברדיו 103FM. פיד אישי.</itunes:summary>
+    <itunes:explicit>false</itunes:explicit>
+    <itunes:category text="News"/>
+    <itunes:image href="https://103fm.maariv.co.il/images/logo_fm_footer.png"/>
+    <image>
+      <url>https://103fm.maariv.co.il/images/logo_fm_footer.png</url>
+      <title>ינון מגל ובן כספית - 103FM</title>
+      <link>https://103fm.maariv.co.il/program/ינון-מגל-בן-כספית.aspx</link>
+    </image>
+    <item>
+      <title>התוכנית המלאה 29.07.26</title>
+      <link>https://103fm.maariv.co.il/programs/media.aspx?ZrqvnVq=KGKIFF&amp;c41t4nzVQ=FJF</link>
+      <description>התוכנית המלאה 29.07.26</description>
+      <enclosure url="https://awaod01.streamgates.net/103fm_aw/mag2907264.mp3" length="85849652" type="audio/mpeg"/>
+      <guid isPermaLink="false">mag2907264</guid>
+      <pubDate>Wed, 29 Jul 2026 11:00:00 +0300</pubDate>
+      <itunes:explicit>false</itunes:explicit>
+    </item>
+    <item>
+      <title>התוכנית המלאה 28.07.26</title>
+      <link>https://103fm.maariv.co.il/programs/media.aspx?ZrqvnVq=KGKGLJ&amp;c41t4nzVQ=FJF</link>
+      <description>התוכנית המלאה 28.07.26</description>
+      <enclosure url="https://awaod01.streamgates.net/103fm_aw/mag2807265.mp3" length="79668454" type="audio/mpeg"/>
+      <guid isPermaLink="false">mag2807265</guid>
+      <pubDate>Tue, 28 Jul 2026 11:00:00 +0300</pubDate>
+      <itunes:explicit>false</itunes:explicit>
+    </item>
+    <item>
+      <title>התוכנית המלאה</title>
+      <link>https://103fm.maariv.co.il/programs/media.aspx?ZrqvnVq=KGKFGD&amp;c41t4nzVQ=FJF</link>
+      <description>התוכנית המלאה</description>
+      <enclosure url="https://awaod01.streamgates.net/103fm_aw/mag2707265.mp3" length="77822746" type="audio/mpeg"/>
+      <guid isPermaLink="false">mag2707265</guid>
+      <pubDate>Wed, 29 Jul 2026 19:45:57 +0000</pubDate>
+      <itunes:explicit>false</itunes:explicit>
+    </item>
+    <item>
+      <title>התוכנית המלאה 22.07.26</title>
+      <link>https://103fm.maariv.co.il/programs/media.aspx?ZrqvnVq=KGJLLJ&amp;c41t4nzVQ=FJF</link>
+      <description>התוכנית המלאה 22.07.26</description>
+      <enclosure url="https://awaod01.streamgates.net/103fm_aw/mag2207265.mp3" length="86525074" type="audio/mpeg"/>
+      <guid isPermaLink="false">mag2207265</guid>
+      <pubDate>Wed, 22 Jul 2026 11:00:00 +0300</pubDate>
+      <itunes:explicit>false</itunes:explicit>
+    </item>
+    <item>
+      <title>התוכנית המלאה</title>
+      <link>https://103fm.maariv.co.il/programs/media.aspx?ZrqvnVq=KGJKLM&amp;c41t4nzVQ=FJF</link>
+      <description>התוכנית המלאה</description>
+      <enclosure url="https://awaod01.streamgates.net/103fm_aw/mag2107265.mp3" length="84188682" type="audio/mpeg"/>
+      <guid isPermaLink="false">mag2107265</guid>
+      <pubDate>Wed, 29 Jul 2026 19:45:57 +0000</pubDate>
+      <itunes:explicit>false</itunes:explicit>
+    </item>
+    <item>
+      <title>התוכנית המלאה 20.07.26</title>
+      <link>https://103fm.maariv.co.il/programs/media.aspx?ZrqvnVq=KGJJKL&amp;c41t4nzVQ=FJF</link>
+      <description>התוכנית המלאה 20.07.26</description>
+      <enclosure url="https://awaod01.streamgates.net/103fm_aw/mag2007265.mp3" length="79659259" type="audio/mpeg"/>
+      <guid isPermaLink="false">mag2007265</guid>
+      <pubDate>Mon, 20 Jul 2026 11:00:00 +0300</pubDate>
+      <itunes:explicit>false</itunes:explicit>
+    </item>
+    <item>
+      <title>התוכנית המלאה 15.07.26</title>
+      <link>https://103fm.maariv.co.il/programs/media.aspx?ZrqvnVq=KGJFGI&amp;c41t4nzVQ=FJF</link>
+      <description>התוכנית המלאה 15.07.26</description>
+      <enclosure url="https://awaod01.streamgates.net/103fm_aw/mag150726100.mp3" length="78949146" type="audio/mpeg"/>
+      <guid isPermaLink="false">mag150726100</guid>
+      <pubDate>Wed, 15 Jul 2026 11:00:00 +0300</pubDate>
+      <itunes:explicit>false</itunes:explicit>
+    </item>
+  </channel>
+</rss>

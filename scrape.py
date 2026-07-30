@@ -1,23 +1,21 @@
 #!/usr/bin/env python3
 """
-103FM Podcast Feed Generator - v0.2
+103FM Podcast Feed Generator - v0.3
 
-Scrapes the show's main page and extracts, per day:
-  - Segments (interviews, arguments)
-  - Full episode ("התוכנית המלאה")
-
-Feed order (newest first, as podcast apps display):
-  Day N: segment[0], segment[1], ..., segment[K], full episode
-  Day N-1: segment[0], ..., full episode
-  ...
-
-pubDate is computed so segments always appear ABOVE the full episode
-of the same day in podcast apps.
+Changes from v0.2:
+  - Monthly safety cap: halt after MAX_COMMITS_PER_MONTH commits to the
+    feed file in the current calendar month. Protects against runaway
+    loops from bugs. Can be overridden by setting FORCE_RUN=true.
+  - Fallback to today's date for the current-day full episode title
+    (fixes case where the open day at the top of 103FM's page doesn't
+    embed a visible date next to the "התוכנית המלאה" text).
 """
 
+import os
 import re
 import sys
 import html
+import subprocess
 import urllib.request
 import urllib.parse
 from datetime import datetime, timezone, timedelta
@@ -34,6 +32,12 @@ OUTPUT_FILE = "pkfsfm9xqbhxbxkc.xml"
 MAX_DAYS = 5
 CONCURRENT_REQUESTS = 8
 USER_AGENT = "Mozilla/5.0 (compatible; PodcastFeedBot/1.0)"
+
+# Safety cap: hard limit on commits per calendar month to protect against
+# runaway loops. Normal usage is ~22/month. Cloudflare Pages allows 500/month.
+# 100 = 4.5x normal, 20% of Cloudflare limit → comfortable margin.
+MAX_COMMITS_PER_MONTH = 100
+FORCE_RUN = os.environ.get('FORCE_RUN', '').lower() == 'true'
 
 FEED_TITLE = "ינון מגל ובן כספית - 103FM"
 FEED_DESCRIPTION = "התוכנית של ינון מגל ובן כספית ברדיו 103FM — כולל ראיונות, ריבים ותוכניות מלאות. פיד אישי."
@@ -58,6 +62,25 @@ def head(url: str):
             return r.status, int(length) if length else 0
     except Exception:
         return None, 0
+
+# ---------- Safety cap ----------
+def count_commits_this_month() -> int:
+    """Count commits to OUTPUT_FILE in the current calendar month (UTC)."""
+    try:
+        now_utc = datetime.now(timezone.utc)
+        first_of_month = now_utc.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        result = subprocess.run(
+            ['git', 'log', '--since', first_of_month.isoformat(), '--oneline', '--', OUTPUT_FILE],
+            capture_output=True, text=True, timeout=10
+        )
+        if result.returncode != 0:
+            print(f"  git log failed (rc={result.returncode}): {result.stderr[:200]}", file=sys.stderr)
+            return 0
+        lines = [l for l in result.stdout.strip().split('\n') if l.strip()]
+        return len(lines)
+    except Exception as e:
+        print(f"  Failed to count commits: {e}", file=sys.stderr)
+        return 0
 
 # ---------- Helpers ----------
 def parse_date(date_str: str):
@@ -86,10 +109,15 @@ def clean_text(text: str) -> str:
 def extract_items_from_page(page_html: str):
     """
     Extract all items from the show's main page.
-    Returns a list of item dicts, in the order they should appear in the feed
+    Returns a list of item dicts in the order they should appear in the feed
     (day N segments, day N full, day N-1 segments, day N-1 full, ...).
     """
     items = []
+
+    # Compute today's date once (used as fallback for the "open" day)
+    today_il = datetime.now(TZ_IL)
+    today_date_str = f"{today_il.day:02d}.{today_il.month:02d}.{today_il.year % 100:02d}"
+    today_date_parsed = (today_il.day, today_il.month, today_il.year)
 
     day_dates = re.findall(
         r'<div class="day_date">(\d{1,2}\.\d{1,2}\.\d{2,4})</div>',
@@ -108,6 +136,13 @@ def extract_items_from_page(page_html: str):
         day_idx = int(day_idx_str)
         day_date_str = day_dates[day_idx] if day_idx < len(day_dates) else None
         day_date_parsed = parse_date(day_date_str) if day_date_str else None
+
+        # The "open" day (day_block_idx == 0) at the top of 103FM's page
+        # doesn't always expose its date in the same place. Fall back to today.
+        if day_date_parsed is None and day_block_idx == 0:
+            day_date_str = today_date_str
+            day_date_parsed = today_date_parsed
+            print(f"  Day 0: no date in HTML, falling back to today ({today_date_str})", file=sys.stderr)
 
         # Segments (interviews/arguments)
         segment_pattern = re.compile(
@@ -150,9 +185,12 @@ def extract_items_from_page(page_html: str):
         day_full = None
         for href, full_content in full_shows:
             title_m = re.search(r'<div dir="rtl">(התוכנית המלאה\s+[\d.]+)</div>', full_content)
-            title = clean_text(title_m.group(1)) if title_m else (
-                f"התוכנית המלאה {day_date_str}" if day_date_str else "התוכנית המלאה"
-            )
+            if title_m:
+                title = clean_text(title_m.group(1))
+            elif day_date_str:
+                title = f"התוכנית המלאה {day_date_str}"
+            else:
+                title = "התוכנית המלאה"
             day_full = {
                 "type": "full",
                 "page_url": MEDIA_BASE + href,
@@ -195,7 +233,7 @@ def fetch_size(item):
 def compute_pub_date(item):
     """
     Within one day, segments should appear ABOVE full episode in podcast apps.
-    Strategy: segments get 12:59-N, full episode gets 09:00.
+    Strategy: segments get 12:59-seg_idx, full episode gets 09:00.
     """
     if not item.get("date"):
         return datetime.now(TZ_IL)
@@ -266,6 +304,17 @@ def build_rss(items) -> str:
 
 # ---------- Main ----------
 def main():
+    # Safety cap - halt if we've exceeded the monthly commit budget
+    if FORCE_RUN:
+        print("FORCE_RUN=true: skipping safety cap check", file=sys.stderr)
+    else:
+        commits = count_commits_this_month()
+        print(f"Safety check: {commits}/{MAX_COMMITS_PER_MONTH} commits to feed this month", file=sys.stderr)
+        if commits >= MAX_COMMITS_PER_MONTH:
+            print(f"HALTING: monthly commit cap reached ({commits} >= {MAX_COMMITS_PER_MONTH}).", file=sys.stderr)
+            print(f"To override for one run, trigger workflow_dispatch with force=true.", file=sys.stderr)
+            sys.exit(0)
+
     print(f"Fetching program page: {PROGRAM_URL}", file=sys.stderr)
     page_html = fetch(PROGRAM_URL)
 

@@ -6,7 +6,12 @@ on:
     # In Israel summer time (UTC+3) = 13:00, winter (UTC+2) = 12:00.
     # Show ends 11:00 IL time, so this leaves ample buffer for episode upload.
     - cron: '0 10 * * 0-4'
-  workflow_dispatch:  # allow manual trigger from GitHub UI
+  workflow_dispatch:
+    inputs:
+      force:
+        description: 'Bypass monthly safety cap (only use if legitimately hit the cap)'
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -17,6 +22,8 @@ jobs:
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Full git history required for the safety cap's commit count
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -24,6 +31,8 @@ jobs:
           python-version: '3.11'
 
       - name: Run scraper
+        env:
+          FORCE_RUN: ${{ inputs.force }}
         run: python scrape.py
 
       - name: Commit and push if changed

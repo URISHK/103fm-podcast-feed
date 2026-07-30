@@ -1,32 +1,48 @@
 #!/usr/bin/env python3
 """
-103FM Podcast Feed Generator
-Scrapes the 'Yinon Magal & Ben Caspit' show page and generates an RSS podcast feed.
+103FM Podcast Feed Generator - v0.2
+
+Scrapes the show's main page and extracts, per day:
+  - Segments (interviews, arguments)
+  - Full episode ("התוכנית המלאה")
+
+Feed order (newest first, as podcast apps display):
+  Day N: segment[0], segment[1], ..., segment[K], full episode
+  Day N-1: segment[0], ..., full episode
+  ...
+
+pubDate is computed so segments always appear ABOVE the full episode
+of the same day in podcast apps.
 """
 
 import re
 import sys
 import html
 import urllib.request
+import urllib.parse
 from datetime import datetime, timezone, timedelta
 from email.utils import format_datetime
 from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # ---------- Configuration ----------
-PROGRAM_ID = "FJF"  # Yinon Magal & Ben Caspit on 103FM
-PROGRAM_URL = f"https://103fm.maariv.co.il/programs/complete_episodes.aspx?c41t4nzVQ={PROGRAM_ID}"
+PROGRAM_ID = "FJF"
+PROGRAM_URL = "https://103fm.maariv.co.il/program/" + urllib.parse.quote("ינון-מגל-בן-כספית") + ".aspx"
 MEDIA_BASE = "https://103fm.maariv.co.il"
 MP3_BASE = "https://awaod01.streamgates.net/103fm_aw"
-OUTPUT_FILE = "pkfsfm9xqbhxbxkc.xml"  # Obfuscated filename
-MAX_EPISODES = 7
+OUTPUT_FILE = "pkfsfm9xqbhxbxkc.xml"
+MAX_DAYS = 5
+CONCURRENT_REQUESTS = 8
 USER_AGENT = "Mozilla/5.0 (compatible; PodcastFeedBot/1.0)"
 
 FEED_TITLE = "ינון מגל ובן כספית - 103FM"
-FEED_DESCRIPTION = "התוכנית היומית המלאה של ינון מגל ובן כספית ברדיו 103FM. פיד אישי."
-FEED_LINK = "https://103fm.maariv.co.il/program/ינון-מגל-בן-כספית.aspx"
+FEED_DESCRIPTION = "התוכנית של ינון מגל ובן כספית ברדיו 103FM — כולל ראיונות, ריבים ותוכניות מלאות. פיד אישי."
+FEED_LINK = PROGRAM_URL
 FEED_LANGUAGE = "he"
 FEED_AUTHOR = "103FM"
 FEED_IMAGE = "https://103fm.maariv.co.il/images/logo_fm_footer.png"
+
+TZ_IL = timezone(timedelta(hours=3))
 
 # ---------- HTTP helpers ----------
 def fetch(url: str) -> str:
@@ -40,77 +56,181 @@ def head(url: str):
         with urllib.request.urlopen(req, timeout=30) as r:
             length = r.headers.get("Content-Length")
             return r.status, int(length) if length else 0
-    except Exception as e:
-        print(f"  HEAD failed: {e}", file=sys.stderr)
+    except Exception:
         return None, 0
 
+# ---------- Helpers ----------
+def parse_date(date_str: str):
+    """Parse date in DD/MM/YYYY or DD.MM.YY format. Returns (day, month, year) or None."""
+    for sep in ("/", "."):
+        if sep in date_str:
+            parts = date_str.split(sep)
+            if len(parts) == 3:
+                try:
+                    d, m, y = int(parts[0]), int(parts[1]), int(parts[2])
+                    if y < 100:
+                        y += 2000
+                    return d, m, y
+                except ValueError:
+                    pass
+    return None
+
+def clean_text(text: str) -> str:
+    """Strip tags, decode HTML entities, normalize whitespace."""
+    text = re.sub(r'<[^>]+>', '', text)
+    text = html.unescape(text)
+    text = re.sub(r'\s+', ' ', text).strip()
+    return text
+
 # ---------- Extraction ----------
-def find_episode_page_urls(list_html: str):
-    """Extract links to individual episode pages from the show's episode list page."""
-    pattern = r'/programs/media\.aspx\?ZrqvnVq=([A-Za-z0-9]+)&(?:amp;)?c41t4nzVQ=' + PROGRAM_ID
-    matches = re.findall(pattern, list_html)
-    seen = set()
-    result = []
-    for m in matches:
-        if m not in seen:
-            seen.add(m)
-            result.append(f"{MEDIA_BASE}/programs/media.aspx?ZrqvnVq={m}&c41t4nzVQ={PROGRAM_ID}")
-    return result
+def extract_items_from_page(page_html: str):
+    """
+    Extract all items from the show's main page.
+    Returns a list of item dicts, in the order they should appear in the feed
+    (day N segments, day N full, day N-1 segments, day N-1 full, ...).
+    """
+    items = []
 
-def extract_episode_info(page_html: str, page_url: str):
-    """From a single episode page, extract data-file value, title, and date."""
-    df_match = re.search(r'data-file="([^"]+)"', page_html)
-    if not df_match:
-        return None
-    data_file = df_match.group(1)
+    day_dates = re.findall(
+        r'<div class="day_date">(\d{1,2}\.\d{1,2}\.\d{2,4})</div>',
+        page_html
+    )
+    print(f"  Found {len(day_dates)} day dates: {day_dates}", file=sys.stderr)
 
-    title = "התוכנית המלאה"
-    pub_date = None
+    day_pattern = re.compile(
+        r'<div class="days grid" id="innerList_(\d+)"[^>]*>(.*?)</div>\s*</li>',
+        re.DOTALL
+    )
+    day_blocks = day_pattern.findall(page_html)
+    print(f"  Found {len(day_blocks)} day blocks", file=sys.stderr)
 
-    # Try to match date like "התוכנית המלאה 29.07.26"
-    date_match = re.search(r'התוכנית המלאה\s+(\d{1,2})\.(\d{1,2})\.(\d{2,4})', page_html)
-    if date_match:
-        day, month, year = (int(x) for x in date_match.groups())
-        if year < 100:
-            year += 2000
-        title = f"התוכנית המלאה {day:02d}.{month:02d}.{year % 100:02d}"
-        try:
-            tz_il = timezone(timedelta(hours=3))
-            pub_date = datetime(year, month, day, 11, 0, 0, tzinfo=tz_il)
-        except ValueError:
-            pub_date = None
+    for day_block_idx, (day_idx_str, day_content) in enumerate(day_blocks[:MAX_DAYS]):
+        day_idx = int(day_idx_str)
+        day_date_str = day_dates[day_idx] if day_idx < len(day_dates) else None
+        day_date_parsed = parse_date(day_date_str) if day_date_str else None
 
-    return {
-        "data_file": data_file,
-        "title": title,
-        "page_url": page_url,
-        "pub_date": pub_date,
-    }
+        # Segments (interviews/arguments)
+        segment_pattern = re.compile(
+            r'<a\s+href="(/programs/media\.aspx\?ZrqvnVq=[^"]+)"\s+'
+            r'id="[^"]*segmentLink_(\d+)"[^>]*>(.*?)</a>',
+            re.DOTALL
+        )
+        segments = segment_pattern.findall(day_content)
+
+        day_segments = []
+        for href, seg_idx_str, seg_content in segments:
+            title_m = re.search(r'<div class="segment_title"[^>]*>(.*?)</div>', seg_content, re.DOTALL)
+            info_m = re.search(r'<div class="segment_info"[^>]*>(.*?)</div>', seg_content, re.DOTALL)
+            date_m = re.search(r'<div class="segment_date_txt">(\d{1,2}/\d{1,2}/\d{4})</div>', seg_content)
+
+            if not title_m:
+                continue
+
+            title = clean_text(title_m.group(1))
+            description = clean_text(info_m.group(1)) if info_m else title
+            item_date = parse_date(date_m.group(1)) if date_m else day_date_parsed
+
+            day_segments.append({
+                "type": "segment",
+                "page_url": MEDIA_BASE + href,
+                "title": title,
+                "description": description,
+                "date": item_date,
+                "seg_idx": int(seg_idx_str),
+            })
+
+        # Full episode
+        full_pattern = re.compile(
+            r'<a\s+href="(/programs/media\.aspx\?ZrqvnVq=[^"]+)"\s+'
+            r'id="[^"]*fullShowLink_\d+"[^>]*>(.*?)</a>',
+            re.DOTALL
+        )
+        full_shows = full_pattern.findall(day_content)
+
+        day_full = None
+        for href, full_content in full_shows:
+            title_m = re.search(r'<div dir="rtl">(התוכנית המלאה\s+[\d.]+)</div>', full_content)
+            title = clean_text(title_m.group(1)) if title_m else (
+                f"התוכנית המלאה {day_date_str}" if day_date_str else "התוכנית המלאה"
+            )
+            day_full = {
+                "type": "full",
+                "page_url": MEDIA_BASE + href,
+                "title": title,
+                "description": title,
+                "date": day_date_parsed,
+            }
+            break
+
+        items.extend(day_segments)
+        if day_full:
+            items.append(day_full)
+
+        print(f"  Day {day_block_idx} ({day_date_str}): {len(day_segments)} segments + {1 if day_full else 0} full", file=sys.stderr)
+
+    return items
+
+def fetch_data_file(item):
+    """Fetch the item's page and extract data-file (audio ID). Mutates item."""
+    try:
+        page_html = fetch(item["page_url"])
+        df_match = re.search(r'data-file="([^"]+)"', page_html)
+        if df_match:
+            item["data_file"] = df_match.group(1)
+    except Exception as e:
+        print(f"  fetch_data_file error for {item.get('title', '?')}: {e}", file=sys.stderr)
+    return item
+
+def fetch_size(item):
+    """HEAD the MP3 URL to get file size. Mutates item."""
+    if not item.get("data_file"):
+        return item
+    mp3_url = f"{MP3_BASE}/{item['data_file']}.mp3"
+    _, size = head(mp3_url)
+    item["mp3_url"] = mp3_url
+    item["size"] = size
+    return item
+
+# ---------- pubDate logic ----------
+def compute_pub_date(item):
+    """
+    Within one day, segments should appear ABOVE full episode in podcast apps.
+    Strategy: segments get 12:59-N, full episode gets 09:00.
+    """
+    if not item.get("date"):
+        return datetime.now(TZ_IL)
+    day, month, year = item["date"]
+    try:
+        if item["type"] == "segment":
+            seg_idx = item.get("seg_idx", 0)
+            minute = max(0, 59 - seg_idx)
+            return datetime(year, month, day, 12, minute, 0, tzinfo=TZ_IL)
+        else:
+            return datetime(year, month, day, 9, 0, 0, tzinfo=TZ_IL)
+    except ValueError:
+        return datetime.now(TZ_IL)
 
 # ---------- XML building ----------
 def escape_xml(text: str) -> str:
     return html.escape(text, quote=True)
 
-def build_rss(episodes) -> str:
+def build_rss(items) -> str:
     now = datetime.now(timezone.utc)
     items_xml = []
 
-    for ep in episodes:
-        mp3_url = f"{MP3_BASE}/{ep['data_file']}.mp3"
-        status, size = head(mp3_url)
-        if status is None or size == 0:
-            print(f"  Skipping {ep['data_file']} (HEAD failed or size 0)", file=sys.stderr)
+    for item in items:
+        if not item.get("data_file") or not item.get("size"):
+            print(f"  Skipping (missing data_file or size): {item.get('title', '?')}", file=sys.stderr)
             continue
 
-        pub_date = ep["pub_date"] or now
-        pub_date_str = format_datetime(pub_date)
-        guid = ep["data_file"]
+        pub_date_str = format_datetime(compute_pub_date(item))
+        guid = item["data_file"]
 
         items_xml.append(f"""    <item>
-      <title>{escape_xml(ep['title'])}</title>
-      <link>{escape_xml(ep['page_url'])}</link>
-      <description>{escape_xml(ep['title'])}</description>
-      <enclosure url="{escape_xml(mp3_url)}" length="{size}" type="audio/mpeg"/>
+      <title>{escape_xml(item['title'])}</title>
+      <link>{escape_xml(item['page_url'])}</link>
+      <description>{escape_xml(item['description'])}</description>
+      <enclosure url="{escape_xml(item['mp3_url'])}" length="{item['size']}" type="audio/mpeg"/>
       <guid isPermaLink="false">{escape_xml(guid)}</guid>
       <pubDate>{pub_date_str}</pubDate>
       <itunes:explicit>false</itunes:explicit>
@@ -147,38 +267,37 @@ def build_rss(episodes) -> str:
 # ---------- Main ----------
 def main():
     print(f"Fetching program page: {PROGRAM_URL}", file=sys.stderr)
-    list_html = fetch(PROGRAM_URL)
+    page_html = fetch(PROGRAM_URL)
 
-    episode_urls = find_episode_page_urls(list_html)
-    print(f"Found {len(episode_urls)} episode page links", file=sys.stderr)
+    print("Extracting items...", file=sys.stderr)
+    items = extract_items_from_page(page_html)
+    if not items:
+        print("ERROR: No items found. HTML structure may have changed.", file=sys.stderr)
+        sys.exit(1)
+    print(f"Total items extracted: {len(items)}", file=sys.stderr)
 
-    if not episode_urls:
-        print("ERROR: No episodes found. HTML structure may have changed.", file=sys.stderr)
+    print(f"Fetching data-file for each item ({CONCURRENT_REQUESTS} workers parallel)...", file=sys.stderr)
+    with ThreadPoolExecutor(max_workers=CONCURRENT_REQUESTS) as ex:
+        futures = [ex.submit(fetch_data_file, item) for item in items]
+        for _ in as_completed(futures):
+            pass
+
+    print("Fetching file sizes...", file=sys.stderr)
+    with ThreadPoolExecutor(max_workers=CONCURRENT_REQUESTS) as ex:
+        futures = [ex.submit(fetch_size, item) for item in items]
+        for _ in as_completed(futures):
+            pass
+
+    valid = [i for i in items if i.get("data_file") and i.get("size")]
+    print(f"Valid items: {len(valid)}/{len(items)}", file=sys.stderr)
+
+    if not valid:
+        print("ERROR: No valid items to include in feed.", file=sys.stderr)
         sys.exit(1)
 
-    episodes = []
-    for url in episode_urls[:MAX_EPISODES]:
-        print(f"Fetching episode page: {url}", file=sys.stderr)
-        try:
-            page_html = fetch(url)
-            info = extract_episode_info(page_html, url)
-            if info:
-                episodes.append(info)
-                print(f"  Got: {info['title']} -> {info['data_file']}", file=sys.stderr)
-            else:
-                print(f"  Could not extract data-file", file=sys.stderr)
-        except Exception as e:
-            print(f"  Error: {e}", file=sys.stderr)
-
-    if not episodes:
-        print("ERROR: No valid episodes found.", file=sys.stderr)
-        sys.exit(1)
-
-    print(f"Building RSS with {len(episodes)} episodes...", file=sys.stderr)
-    rss_xml = build_rss(episodes)
-
+    rss_xml = build_rss(items)
     Path(OUTPUT_FILE).write_text(rss_xml, encoding="utf-8")
-    print(f"Written: {OUTPUT_FILE} ({len(rss_xml)} bytes)", file=sys.stderr)
+    print(f"Written: {OUTPUT_FILE} ({len(rss_xml)} bytes, {len(valid)} items)", file=sys.stderr)
 
 if __name__ == "__main__":
     main()

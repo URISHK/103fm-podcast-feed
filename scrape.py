@@ -1,12 +1,16 @@
 #!/usr/bin/env python3
 """
-103FM Podcast Feed Generator - v0.4
+103FM Podcast Feed Generator - v0.5
 
-Changes from v0.3:
-  - Robust day-date resolution for ALL days (not just day 0):
-    Falls back to segment_date_txt inside the day's content when the
-    outer day_date is missing or misaligned. Fixes bug where the full
-    episode of older days got today's timestamp.
+Changes from v0.4:
+  - Enriched segment titles: prepend speaker name (interviewee or host)
+    extracted heuristically from the segment description via Hebrew role
+    patterns ('ח"כ', 'יו"ר', 'רס"ן', etc.) or host name detection.
+    Fallback: append short snippet of description if no speaker matched.
+    Format: '[name] "[original title]"' or '"[title]" — [snippet]'.
+
+v0.4:
+  - Robust day-date resolution using segment_date_txt inside content.
 
 v0.3:
   - Monthly safety cap (MAX_COMMITS_PER_MONTH) with FORCE_RUN override.
@@ -107,6 +111,99 @@ def clean_text(text: str) -> str:
     text = re.sub(r'\s+', ' ', text).strip()
     return text
 
+# ---------- Speaker extraction (for enriched segment titles) ----------
+HOST_NAMES = ['בן כספית', 'ינון מגל']
+
+# Order matters: more specific patterns first.
+# Each pattern captures a name (typically 2 Hebrew words).
+SPEAKER_PATTERNS = [
+    # יו"ר [org 1-2 words] [name] - e.g. "יו"ר כחול לבן בני גנץ"
+    r'יו"ר\s+\S+(?:\s+\S+)?\s+([\u05D0-\u05EA]+\s+[\u05D0-\u05EA]+)',
+    # ראש עיריית [city] [name]
+    r'ראש עיריית\s+\S+\s+([\u05D0-\u05EA]+\s+[\u05D0-\u05EA]+)',
+    # רס"ן/סא"ל/etc. (מיל') [name]
+    r'(?:רס"ן|סא"ל|אל"מ|תא"ל|אלוף|סג"ם|סרן|רס"ל)\s+\(מיל\'?\)\s+([\u05D0-\u05EA]+\s+[\u05D0-\u05EA]+)',
+    # military ranks (active)
+    r'(?:רס"ן|סא"ל|אל"מ|תא"ל|אלוף|סג"ם|סרן|רס"ל|רב"ט|סמל)\s+([\u05D0-\u05EA]+\s+[\u05D0-\u05EA]+)',
+    # ח"כ [name (1-2 words)]
+    r'ח"כ\s+([\u05D0-\u05EA]+(?:\s+[\u05D0-\u05EA]+){1,2}?)(?=[,\s(]|$)',
+    # השר/שר/השרה [name]
+    r'ה?שר(?:ה)?\s+([\u05D0-\u05EA]+(?:\s+[\u05D0-\u05EA]+){1,2}?)(?=[,\s(]|$)',
+    # ראש הממשלה / רה"מ / ראש האופוזיציה
+    r'(?:ראש הממשלה|רה"מ|ראש האופוזיציה)\s+([\u05D0-\u05EA]+(?:\s+[\u05D0-\u05EA]+){0,2}?)(?=[,\s(]|$)',
+    # ד"ר / פרופ' / עו"ד
+    r'ד"ר\s+([\u05D0-\u05EA]+(?:\s+[\u05D0-\u05EA]+){1,2}?)(?=[,\s(]|$)',
+    r'פרופ\'\s+([\u05D0-\u05EA]+(?:\s+[\u05D0-\u05EA]+){1,2}?)(?=[,\s(]|$)',
+    r'עו"ד\s+([\u05D0-\u05EA]+(?:\s+[\u05D0-\u05EA]+){1,2}?)(?=[,\s(]|$)',
+    # רב / הרב [name]
+    r'ה?רב\s+([\u05D0-\u05EA]+(?:\s+[\u05D0-\u05EA]+){1,2}?)(?=[,\s(]|$)',
+    # מנכ"ל / המנכ"ל
+    r'ה?מנכ"ל\s+(?:\S+\s+)?([\u05D0-\u05EA]+\s+[\u05D0-\u05EA]+)',
+    # שגריר [country] [name]
+    r'שגריר\s+\S+\s+([\u05D0-\u05EA]+\s+[\u05D0-\u05EA]+)',
+    # ראש המועצה [name]
+    r'ראש המועצה\s+(?:\S+\s+)?([\u05D0-\u05EA]+\s+[\u05D0-\u05EA]+)',
+    # הכתב(ת) הצבאי(ת)/הפוליטי(ת) [name]
+    r'ה?כתב(?:ת)?\s+ה?\S+\s+([\u05D0-\u05EA]+\s+[\u05D0-\u05EA]+)',
+    # הפרשן [name]
+    r'ה?פרשן(?:ית)?\s+(?:ה?\S+\s+)?([\u05D0-\u05EA]+\s+[\u05D0-\u05EA]+)',
+]
+
+def extract_speaker(description: str):
+    """
+    Return the primary speaker/interviewee name from the segment description,
+    or None if not confidently detectable.
+    """
+    if not description:
+        return None
+    # Host commentary: description starts with a host name
+    for host in HOST_NAMES:
+        if description.startswith(host):
+            return host
+    # Role + name patterns
+    for pattern in SPEAKER_PATTERNS:
+        m = re.search(pattern, description)
+        if m:
+            name = m.group(1).strip()
+            # Reject if the "name" itself contains a host or is very short
+            if any(h in name for h in HOST_NAMES):
+                continue
+            if len(name) < 3:
+                continue
+            return name
+    return None
+
+def get_snippet(description: str, max_len: int = 70) -> str:
+    """Short snippet of the description, cut at word boundary."""
+    if not description:
+        return ""
+    # Take up to first bullet/pipe separator
+    for sep in ('•', '|', '●', ' - '):
+        if sep in description:
+            description = description.split(sep)[0].strip()
+            break
+    if len(description) <= max_len:
+        return description
+    truncated = description[:max_len]
+    last_space = truncated.rfind(' ')
+    if last_space > max_len // 2:
+        truncated = truncated[:last_space]
+    return truncated + "..."
+
+def build_segment_title(original_title: str, description: str) -> str:
+    """
+    Build enriched segment title.
+      With speaker:    '[name] [original title with its quotes]'
+      Without speaker: '[title] — [description snippet]'
+    """
+    speaker = extract_speaker(description)
+    if speaker:
+        return f"{speaker} {original_title}"
+    snippet = get_snippet(description)
+    if snippet and snippet != original_title:
+        return f"{original_title} — {snippet}"
+    return original_title
+
 # ---------- Extraction ----------
 def extract_items_from_page(page_html: str):
     """
@@ -182,10 +279,12 @@ def extract_items_from_page(page_html: str):
             description = clean_text(info_m.group(1)) if info_m else title
             item_date = parse_date(date_m.group(1)) if date_m else day_date_parsed
 
+            enriched_title = build_segment_title(title, description)
+
             day_segments.append({
                 "type": "segment",
                 "page_url": MEDIA_BASE + href,
-                "title": title,
+                "title": enriched_title,
                 "description": description,
                 "date": item_date,
                 "seg_idx": int(seg_idx_str),

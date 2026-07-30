@@ -1,14 +1,16 @@
 #!/usr/bin/env python3
 """
-103FM Podcast Feed Generator - v0.3
+103FM Podcast Feed Generator - v0.4
 
-Changes from v0.2:
-  - Monthly safety cap: halt after MAX_COMMITS_PER_MONTH commits to the
-    feed file in the current calendar month. Protects against runaway
-    loops from bugs. Can be overridden by setting FORCE_RUN=true.
-  - Fallback to today's date for the current-day full episode title
-    (fixes case where the open day at the top of 103FM's page doesn't
-    embed a visible date next to the "התוכנית המלאה" text).
+Changes from v0.3:
+  - Robust day-date resolution for ALL days (not just day 0):
+    Falls back to segment_date_txt inside the day's content when the
+    outer day_date is missing or misaligned. Fixes bug where the full
+    episode of older days got today's timestamp.
+
+v0.3:
+  - Monthly safety cap (MAX_COMMITS_PER_MONTH) with FORCE_RUN override.
+  - Today's-date fallback for the open day at the top of the page.
 """
 
 import os
@@ -137,12 +139,27 @@ def extract_items_from_page(page_html: str):
         day_date_str = day_dates[day_idx] if day_idx < len(day_dates) else None
         day_date_parsed = parse_date(day_date_str) if day_date_str else None
 
-        # The "open" day (day_block_idx == 0) at the top of 103FM's page
-        # doesn't always expose its date in the same place. Fall back to today.
+        # Fallback 1: if the outer day_date is missing/misaligned, dig into
+        # the day's own content and reuse the date from any segment
+        # (segment_date_txt is always present inside each interview card).
+        if day_date_parsed is None:
+            seg_date_m = re.search(
+                r'<div class="segment_date_txt">(\d{1,2}/\d{1,2}/\d{4})</div>',
+                day_content
+            )
+            if seg_date_m:
+                day_date_parsed = parse_date(seg_date_m.group(1))
+                if day_date_parsed:
+                    d, m, y = day_date_parsed
+                    day_date_str = f"{d:02d}.{m:02d}.{y % 100:02d}"
+                    print(f"  Day {day_block_idx}: recovered date {day_date_str} from segment_date_txt", file=sys.stderr)
+
+        # Fallback 2: the "open" day at the top of 103FM's page may have
+        # no segments yet (early in the broadcast day) — fall back to today.
         if day_date_parsed is None and day_block_idx == 0:
             day_date_str = today_date_str
             day_date_parsed = today_date_parsed
-            print(f"  Day 0: no date in HTML, falling back to today ({today_date_str})", file=sys.stderr)
+            print(f"  Day 0: no date and no segments; falling back to today ({today_date_str})", file=sys.stderr)
 
         # Segments (interviews/arguments)
         segment_pattern = re.compile(

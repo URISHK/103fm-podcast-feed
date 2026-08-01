@@ -1,20 +1,17 @@
 #!/usr/bin/env python3
 """
-103FM Podcast Feed Generator - v0.5
+103FM Podcast Feed Generator - v0.6
 
-Changes from v0.4:
-  - Enriched segment titles: prepend speaker name (interviewee or host)
-    extracted heuristically from the segment description via Hebrew role
-    patterns ('ח"כ', 'יו"ר', 'רס"ן', etc.) or host name detection.
-    Fallback: append short snippet of description if no speaker matched.
-    Format: '[name] "[original title]"' or '"[title]" — [snippet]'.
+Changes from v0.5:
+  - Emoji type prefix in titles for at-a-glance scannability:
+      📻 = full episode ("התוכנית המלאה")
+      💬 = host commentary/argument (when speaker is Ben Caspit or Yinon Magal)
+      🎙️ = interview with external guest
+    This makes the daily full episode visually distinct in podcast apps
+    where it previously blended in with segment titles.
 
-v0.4:
-  - Robust day-date resolution using segment_date_txt inside content.
-
-v0.3:
-  - Monthly safety cap (MAX_COMMITS_PER_MONTH) with FORCE_RUN override.
-  - Today's-date fallback for the open day at the top of the page.
+v0.5:
+  - Enriched segment titles: prepend speaker name from Hebrew role patterns.
 """
 
 import os
@@ -114,6 +111,15 @@ def clean_text(text: str) -> str:
 # ---------- Speaker extraction (for enriched segment titles) ----------
 HOST_NAMES = ['בן כספית', 'ינון מגל']
 
+# Short-form aliases that map to the canonical host name.
+# Longer aliases must come first (matched with startswith).
+HOST_ALIASES = [
+    ('בן כספית', 'בן כספית'),
+    ('ינון מגל', 'ינון מגל'),
+    ('כספית', 'בן כספית'),
+    ('מגל', 'ינון מגל'),
+]
+
 # Order matters: more specific patterns first.
 # Each pattern captures a name (typically 2 Hebrew words).
 SPEAKER_PATTERNS = [
@@ -152,14 +158,19 @@ SPEAKER_PATTERNS = [
 def extract_speaker(description: str):
     """
     Return the primary speaker/interviewee name from the segment description,
-    or None if not confidently detectable.
+    or None if not confidently detectable. Short-form host names are
+    normalized to their canonical full names.
     """
     if not description:
         return None
-    # Host commentary: description starts with a host name
-    for host in HOST_NAMES:
-        if description.startswith(host):
-            return host
+    # Host commentary: description starts with a host name (full or short form)
+    for alias, canonical in HOST_ALIASES:
+        if description.startswith(alias):
+            # Guard: make sure the match ends at a word boundary
+            # (so "מגל" doesn't match a longer word starting with those letters)
+            rest = description[len(alias):]
+            if not rest or rest[0] in ' :,-.':
+                return canonical
     # Role + name patterns
     for pattern in SPEAKER_PATTERNS:
         m = re.search(pattern, description)
@@ -192,17 +203,19 @@ def get_snippet(description: str, max_len: int = 70) -> str:
 
 def build_segment_title(original_title: str, description: str) -> str:
     """
-    Build enriched segment title.
-      With speaker:    '[name] [original title with its quotes]'
-      Without speaker: '[title] — [description snippet]'
+    Build enriched segment title with emoji type marker.
+      Host commentary:  '💬 [host name] [original title]'
+      Interview:        '🎙️ [interviewee name] [original title]'
+      Unknown/fallback: '🎙️ [title] — [snippet]' (default to interview marker)
     """
     speaker = extract_speaker(description)
     if speaker:
-        return f"{speaker} {original_title}"
+        marker = "💬" if speaker in HOST_NAMES else "🎙️"
+        return f"{marker} {speaker} {original_title}"
     snippet = get_snippet(description)
     if snippet and snippet != original_title:
-        return f"{original_title} — {snippet}"
-    return original_title
+        return f"🎙️ {original_title} — {snippet}"
+    return f"🎙️ {original_title}"
 
 # ---------- Extraction ----------
 def extract_items_from_page(page_html: str):
@@ -302,16 +315,17 @@ def extract_items_from_page(page_html: str):
         for href, full_content in full_shows:
             title_m = re.search(r'<div dir="rtl">(התוכנית המלאה\s+[\d.]+)</div>', full_content)
             if title_m:
-                title = clean_text(title_m.group(1))
+                base_title = clean_text(title_m.group(1))
             elif day_date_str:
-                title = f"התוכנית המלאה {day_date_str}"
+                base_title = f"התוכנית המלאה {day_date_str}"
             else:
-                title = "התוכנית המלאה"
+                base_title = "התוכנית המלאה"
+            title = f"📻 {base_title}"
             day_full = {
                 "type": "full",
                 "page_url": MEDIA_BASE + href,
                 "title": title,
-                "description": title,
+                "description": base_title,
                 "date": day_date_parsed,
             }
             break

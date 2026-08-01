@@ -1,17 +1,16 @@
 #!/usr/bin/env python3
 """
-103FM Podcast Feed Generator - v0.6
+103FM Podcast Feed Generator - v0.7
 
-Changes from v0.5:
-  - Emoji type prefix in titles for at-a-glance scannability:
-      📻 = full episode ("התוכנית המלאה")
-      💬 = host commentary/argument (when speaker is Ben Caspit or Yinon Magal)
-      🎙️ = interview with external guest
-    This makes the daily full episode visually distinct in podcast apps
-    where it previously blended in with segment titles.
+Changes from v0.6:
+  - Flipped pubDate order: full episode is now newest of its day (top
+    of podcast app list), followed by segments in interview order.
+    Was previously segments-then-full-at-bottom.
+  - Feed cover image switched from generic 103FM footer logo to the
+    show's actual program image (imgNewTop_262.jpg).
 
-v0.5:
-  - Enriched segment titles: prepend speaker name from Hebrew role patterns.
+v0.6:
+  - Emoji type prefix in titles for at-a-glance scannability.
 """
 
 import os
@@ -47,7 +46,7 @@ FEED_DESCRIPTION = "התוכנית של ינון מגל ובן כספית ברד
 FEED_LINK = PROGRAM_URL
 FEED_LANGUAGE = "he"
 FEED_AUTHOR = "103FM"
-FEED_IMAGE = "https://103fm.maariv.co.il/images/logo_fm_footer.png"
+FEED_IMAGE = "https://103fm.maariv.co.il/download/programs/imgNewTop_262.jpg"
 
 TZ_IL = timezone(timedelta(hours=3))
 
@@ -362,8 +361,9 @@ def fetch_size(item):
 # ---------- pubDate logic ----------
 def compute_pub_date(item):
     """
-    Within one day, segments should appear ABOVE full episode in podcast apps.
-    Strategy: segments get 12:59-seg_idx, full episode gets 09:00.
+    Order within one day (newest first, as shown in podcast apps):
+        full episode (top) → segment[0] → segment[1] → ... → segment[K] (bottom)
+    Strategy: full gets 13:00, segments get 12:59-seg_idx.
     """
     if not item.get("date"):
         return datetime.now(TZ_IL)
@@ -373,8 +373,8 @@ def compute_pub_date(item):
             seg_idx = item.get("seg_idx", 0)
             minute = max(0, 59 - seg_idx)
             return datetime(year, month, day, 12, minute, 0, tzinfo=TZ_IL)
-        else:
-            return datetime(year, month, day, 9, 0, 0, tzinfo=TZ_IL)
+        else:  # full episode - newest of its day
+            return datetime(year, month, day, 13, 0, 0, tzinfo=TZ_IL)
     except ValueError:
         return datetime.now(TZ_IL)
 

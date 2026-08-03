@@ -1,23 +1,19 @@
 #!/usr/bin/env python3
 """
-103FM Podcast Feed Generator - v0.10
+103FM Podcast Feed Generator - v0.11
 
-Changes from v0.9:
-  - CRITICAL FIX: day date resolution was misaligned. The outer
-    `day_dates` array doesn't include the open (top) day because it has
-    no <div class="day_date"> element, so indexing by innerList_N was
-    off-by-one for every day. This caused today's full episode to be
-    tagged with yesterday's date, and every day's full episode date
-    similarly shifted.
-    Fix: extract day date from segment_date_txt found INSIDE each day's
-    own content block, not from the outer array.
-  - Full episode title regex tightened to require DD.MM.YY format. When
-    HTML uses Hebrew month name (e.g. "3 באוגוסט 2026" for today), we
-    now correctly fall back to day_date_str built from the day's
-    segments — producing consistent titles like "התוכנית המלאה 03.08.26".
+Changes from v0.10:
+  - Speaker extraction now truncates the description at the first ':'
+    before applying role patterns. Beyond the colon is the quoted content
+    of what was said, not who said it — role words like 'אלוף' appearing
+    inside a quote were being incorrectly matched as military ranks.
+  - Anchored military-rank patterns to ^ of the meta portion.
+  - Tightened role+name patterns (ח"כ, שר, ד"ר, וכו') to require at least
+    two Hebrew words for the name, preventing single-word false matches
+    like 'הביטחון' being captured as a person's name after 'שר'.
 
-v0.9:
-  - Added 'ינון' alias + journalist "Name (outlet)" pattern.
+v0.10:
+  - Critical day-date alignment fix (segment_date_txt as primary source).
 """
 
 import os
@@ -130,35 +126,40 @@ HOST_ALIASES = [
 
 # Order matters: more specific patterns first.
 # Each pattern captures a name (typically 2 Hebrew words).
+# Note: these patterns are applied to the "meta" portion of the description
+# (before the first ':'), so anchoring to ^ means start of meta, not start
+# of the whole description.
 SPEAKER_PATTERNS = [
     # יו"ר [org 1-2 words] [name] - e.g. "יו"ר כחול לבן בני גנץ"
     r'יו"ר\s+\S+(?:\s+\S+)?\s+([\u05D0-\u05EA]+\s+[\u05D0-\u05EA]+)',
     # ראש עיריית [city] [name]
     r'ראש עיריית\s+\S+\s+([\u05D0-\u05EA]+\s+[\u05D0-\u05EA]+)',
-    # רס"ן/סא"ל/etc. (מיל') [name]
-    r'(?:רס"ן|סא"ל|אל"מ|תא"ל|אלוף|סג"ם|סרן|רס"ל)\s+\(מיל\'?\)\s+([\u05D0-\u05EA]+\s+[\u05D0-\u05EA]+)',
-    # military ranks (active)
-    r'(?:רס"ן|סא"ל|אל"מ|תא"ל|אלוף|סג"ם|סרן|רס"ל|רב"ט|סמל)\s+([\u05D0-\u05EA]+\s+[\u05D0-\u05EA]+)',
-    # ח"כ [name (1-2 words)]
-    r'ח"כ\s+([\u05D0-\u05EA]+(?:\s+[\u05D0-\u05EA]+){1,2}?)(?=[,\s(]|$)',
-    # השר/שר/השרה [name]
-    r'ה?שר(?:ה)?\s+([\u05D0-\u05EA]+(?:\s+[\u05D0-\u05EA]+){1,2}?)(?=[,\s(]|$)',
+    # רס"ן/סא"ל/etc. (מיל') [name] - anchored to start (word "אלוף" also means
+    # "champion" and appears in prose; only trust it as a rank at the very start).
+    r'^(?:רס"ן|סא"ל|אל"מ|תא"ל|אלוף|סג"ם|סרן|רס"ל)\s+\(מיל\'?\)\s+([\u05D0-\u05EA]+\s+[\u05D0-\u05EA]+)',
+    # military ranks (active) - anchored to start of meta
+    r'^(?:רס"ן|סא"ל|אל"מ|תא"ל|אלוף|סג"ם|סרן|רס"ל|רב"ט|סמל)\s+([\u05D0-\u05EA]+\s+[\u05D0-\u05EA]+)',
+    # ח"כ [name (exactly 2 words)]
+    r'ח"כ\s+([\u05D0-\u05EA]+\s+[\u05D0-\u05EA]+)(?=\s*[,(]|\s*$)',
+    # השר/שר/השרה [name] - requires exactly 2 Hebrew words followed by
+    # comma/paren/end. Avoids matching "שר הביטחון" and grabbing verbs.
+    r'ה?שר(?:ה)?\s+([\u05D0-\u05EA]+\s+[\u05D0-\u05EA]+)(?=\s*[,(]|\s*$)',
     # ראש הממשלה / רה"מ / ראש האופוזיציה
-    r'(?:ראש הממשלה|רה"מ|ראש האופוזיציה)\s+([\u05D0-\u05EA]+(?:\s+[\u05D0-\u05EA]+){0,2}?)(?=[,\s(]|$)',
+    r'(?:ראש הממשלה|רה"מ|ראש האופוזיציה)\s+([\u05D0-\u05EA]+\s+[\u05D0-\u05EA]+)(?=\s*[,(]|\s*$)',
     # ד"ר / פרופ' / עו"ד
-    r'ד"ר\s+([\u05D0-\u05EA]+(?:\s+[\u05D0-\u05EA]+){1,2}?)(?=[,\s(]|$)',
-    r'פרופ\'\s+([\u05D0-\u05EA]+(?:\s+[\u05D0-\u05EA]+){1,2}?)(?=[,\s(]|$)',
-    r'עו"ד\s+([\u05D0-\u05EA]+(?:\s+[\u05D0-\u05EA]+){1,2}?)(?=[,\s(]|$)',
-    # רב / הרב [name]
-    r'ה?רב\s+([\u05D0-\u05EA]+(?:\s+[\u05D0-\u05EA]+){1,2}?)(?=[,\s(]|$)',
+    r'ד"ר\s+([\u05D0-\u05EA]+\s+[\u05D0-\u05EA]+)(?=\s*[,(]|\s*$)',
+    r'פרופ\'\s+([\u05D0-\u05EA]+\s+[\u05D0-\u05EA]+)(?=\s*[,(]|\s*$)',
+    r'עו"ד\s+([\u05D0-\u05EA]+\s+[\u05D0-\u05EA]+)(?=\s*[,(]|\s*$)',
+    # רב / הרב [name] - anchored to start (רב also means "many/great")
+    r'^ה?רב\s+([\u05D0-\u05EA]+\s+[\u05D0-\u05EA]+)(?=\s*[,(]|\s*$)',
     # מנכ"ל / המנכ"ל
     r'ה?מנכ"ל\s+(?:\S+\s+)?([\u05D0-\u05EA]+\s+[\u05D0-\u05EA]+)',
     # שגריר [country] [name]
     r'שגריר\s+\S+\s+([\u05D0-\u05EA]+\s+[\u05D0-\u05EA]+)',
     # ראש המועצה [name]
     r'ראש המועצה\s+(?:\S+\s+)?([\u05D0-\u05EA]+\s+[\u05D0-\u05EA]+)',
-    # הכתב(ת) הצבאי(ת)/הפוליטי(ת) [name]
-    r'ה?כתב(?:ת)?\s+ה?\S+\s+([\u05D0-\u05EA]+\s+[\u05D0-\u05EA]+)',
+    # הכתב(ת) הצבאי(ת)/הפוליטי(ת) [name] - anchored (כתב also means "wrote")
+    r'^ה?כתב(?:ת)?\s+ה?\S+\s+([\u05D0-\u05EA]+\s+[\u05D0-\u05EA]+)',
     # הפרשן [name]
     r'ה?פרשן(?:ית)?\s+(?:ה?\S+\s+)?([\u05D0-\u05EA]+\s+[\u05D0-\u05EA]+)',
     # Journalist / commentator pattern: "Name Surname (outlet)" at start of description
@@ -174,7 +175,8 @@ def extract_speaker(description: str):
     """
     if not description:
         return None
-    # Host commentary: description starts with a host name (full or short form)
+    # Host commentary: description starts with a host name (full or short form).
+    # Checked FIRST because it uses startswith (already implicitly anchored).
     for alias, canonical in HOST_ALIASES:
         if description.startswith(alias):
             # Guard: make sure the match ends at a word boundary
@@ -182,9 +184,15 @@ def extract_speaker(description: str):
             rest = description[len(alias):]
             if not rest or rest[0] in ' :,-.':
                 return canonical
+    # For role patterns, restrict search to the "meta" portion of the
+    # description (before the first ':'). Anything after the colon is
+    # the quoted content — role words like 'אלוף' appearing there are
+    # not real military rank references.
+    colon_idx = description.find(':')
+    meta_part = description[:colon_idx] if colon_idx != -1 else description
     # Role + name patterns
     for pattern in SPEAKER_PATTERNS:
-        m = re.search(pattern, description)
+        m = re.search(pattern, meta_part)
         if m:
             name = m.group(1).strip()
             # Reject if the "name" itself contains a host or is very short

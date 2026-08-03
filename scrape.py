@@ -1,16 +1,15 @@
 #!/usr/bin/env python3
 """
-103FM Podcast Feed Generator - v0.7
+103FM Podcast Feed Generator - v0.8
 
-Changes from v0.6:
-  - Flipped pubDate order: full episode is now newest of its day (top
-    of podcast app list), followed by segments in interview order.
-    Was previously segments-then-full-at-bottom.
-  - Feed cover image switched from generic 103FM footer logo to the
-    show's actual program image (imgNewTop_262.jpg).
+Changes from v0.7:
+  - Avoid double-prepending speaker name when the segment title already
+    starts with the speaker's last name. Fixes cases like the show's own
+    "כספית נגד X" title becoming "בן כספית כספית נגד X".
 
-v0.6:
-  - Emoji type prefix in titles for at-a-glance scannability.
+v0.7:
+  - Full episode on top of its day (pubDate 13:00 vs segments 12:XX).
+  - Show cover image instead of generic 103FM logo.
 """
 
 import os
@@ -206,10 +205,24 @@ def build_segment_title(original_title: str, description: str) -> str:
       Host commentary:  '💬 [host name] [original title]'
       Interview:        '🎙️ [interviewee name] [original title]'
       Unknown/fallback: '🎙️ [title] — [snippet]' (default to interview marker)
+
+    If the original title already starts with the speaker's last name (or
+    full name), don't prepend it again — avoids duplicates like
+    "בן כספית כספית נגד כ״ץ".
     """
     speaker = extract_speaker(description)
     if speaker:
         marker = "💬" if speaker in HOST_NAMES else "🎙️"
+        # Check whether title already begins with the speaker's name.
+        # Strip leading quote/whitespace characters to normalize the check.
+        stripped_title = original_title.lstrip(' "\'\u201c\u201d')
+        speaker_words = speaker.split()
+        already_named = (
+            stripped_title.startswith(speaker)
+            or (speaker_words and stripped_title.startswith(speaker_words[-1]))
+        )
+        if already_named:
+            return f"{marker} {original_title}"
         return f"{marker} {speaker} {original_title}"
     snippet = get_snippet(description)
     if snippet and snippet != original_title:

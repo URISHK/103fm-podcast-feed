@@ -1,15 +1,16 @@
 #!/usr/bin/env python3
 """
-103FM Podcast Feed Generator - v0.8
+103FM Podcast Feed Generator - v0.9
 
-Changes from v0.7:
-  - Avoid double-prepending speaker name when the segment title already
-    starts with the speaker's last name. Fixes cases like the show's own
-    "כספית נגד X" title becoming "בן כספית כספית נגד X".
+Changes from v0.8:
+  - Added 'ינון' short-form alias → normalized to 'ינון מגל'.
+    (Kept safe: only matched when followed by space/colon/comma/etc.)
+  - New speaker pattern for journalists: 'Name Surname (outlet)' at the
+    start of the description — recognizes interviewees like
+    'יוסי יהושוע (ידיעות אחרונות)' who don't have a Hebrew title prefix.
 
-v0.7:
-  - Full episode on top of its day (pubDate 13:00 vs segments 12:XX).
-  - Show cover image instead of generic 103FM logo.
+v0.8:
+  - Fixed double-prepending speaker when title already starts with the name.
 """
 
 import os
@@ -116,6 +117,8 @@ HOST_ALIASES = [
     ('ינון מגל', 'ינון מגל'),
     ('כספית', 'בן כספית'),
     ('מגל', 'ינון מגל'),
+    ('ינון', 'ינון מגל'),
+    # Note: 'בן' alone is intentionally omitted — too common a Hebrew word.
 ]
 
 # Order matters: more specific patterns first.
@@ -151,6 +154,9 @@ SPEAKER_PATTERNS = [
     r'ה?כתב(?:ת)?\s+ה?\S+\s+([\u05D0-\u05EA]+\s+[\u05D0-\u05EA]+)',
     # הפרשן [name]
     r'ה?פרשן(?:ית)?\s+(?:ה?\S+\s+)?([\u05D0-\u05EA]+\s+[\u05D0-\u05EA]+)',
+    # Journalist / commentator pattern: "Name Surname (outlet)" at start of description
+    # e.g. "יוסי יהושוע (ידיעות אחרונות) מתח ביקורת..."
+    r'^([\u05D0-\u05EA]+\s+[\u05D0-\u05EA]+)\s*\(',
 ]
 
 def extract_speaker(description: str):

@@ -1,16 +1,23 @@
 #!/usr/bin/env python3
 """
-103FM Podcast Feed Generator - v0.9
+103FM Podcast Feed Generator - v0.10
 
-Changes from v0.8:
-  - Added 'ינון' short-form alias → normalized to 'ינון מגל'.
-    (Kept safe: only matched when followed by space/colon/comma/etc.)
-  - New speaker pattern for journalists: 'Name Surname (outlet)' at the
-    start of the description — recognizes interviewees like
-    'יוסי יהושוע (ידיעות אחרונות)' who don't have a Hebrew title prefix.
+Changes from v0.9:
+  - CRITICAL FIX: day date resolution was misaligned. The outer
+    `day_dates` array doesn't include the open (top) day because it has
+    no <div class="day_date"> element, so indexing by innerList_N was
+    off-by-one for every day. This caused today's full episode to be
+    tagged with yesterday's date, and every day's full episode date
+    similarly shifted.
+    Fix: extract day date from segment_date_txt found INSIDE each day's
+    own content block, not from the outer array.
+  - Full episode title regex tightened to require DD.MM.YY format. When
+    HTML uses Hebrew month name (e.g. "3 באוגוסט 2026" for today), we
+    now correctly fall back to day_date_str built from the day's
+    segments — producing consistent titles like "התוכנית המלאה 03.08.26".
 
-v0.8:
-  - Fixed double-prepending speaker when title already starts with the name.
+v0.9:
+  - Added 'ינון' alias + journalist "Name (outlet)" pattern.
 """
 
 import os
@@ -264,30 +271,30 @@ def extract_items_from_page(page_html: str):
 
     for day_block_idx, (day_idx_str, day_content) in enumerate(day_blocks[:MAX_DAYS]):
         day_idx = int(day_idx_str)
-        day_date_str = day_dates[day_idx] if day_idx < len(day_dates) else None
-        day_date_parsed = parse_date(day_date_str) if day_date_str else None
 
-        # Fallback 1: if the outer day_date is missing/misaligned, dig into
-        # the day's own content and reuse the date from any segment
-        # (segment_date_txt is always present inside each interview card).
-        if day_date_parsed is None:
-            seg_date_m = re.search(
-                r'<div class="segment_date_txt">(\d{1,2}/\d{1,2}/\d{4})</div>',
-                day_content
-            )
-            if seg_date_m:
-                day_date_parsed = parse_date(seg_date_m.group(1))
-                if day_date_parsed:
-                    d, m, y = day_date_parsed
-                    day_date_str = f"{d:02d}.{m:02d}.{y % 100:02d}"
-                    print(f"  Day {day_block_idx}: recovered date {day_date_str} from segment_date_txt", file=sys.stderr)
+        # Primary source: pull the day's date from a segment_date_txt inside
+        # this day's content block. This is always accurate because each
+        # segment card carries its own date. Avoids the misalignment bug
+        # where day_dates[day_idx] is off-by-one when the open day at the
+        # top of the page doesn't have a <div class="day_date"> element.
+        seg_date_m = re.search(
+            r'<div class="segment_date_txt">(\d{1,2}/\d{1,2}/\d{4})</div>',
+            day_content
+        )
+        day_date_parsed = parse_date(seg_date_m.group(1)) if seg_date_m else None
 
-        # Fallback 2: the "open" day at the top of 103FM's page may have
-        # no segments yet (early in the broadcast day) — fall back to today.
+        # Fallback: the open day may not yet have any segments with dates
+        # (e.g. early morning). Use today's date only for day_block_idx == 0.
         if day_date_parsed is None and day_block_idx == 0:
-            day_date_str = today_date_str
             day_date_parsed = today_date_parsed
-            print(f"  Day 0: no date and no segments; falling back to today ({today_date_str})", file=sys.stderr)
+            print(f"  Day 0: no segment dates found, falling back to today", file=sys.stderr)
+
+        # Build the DD.MM.YY string used in fallback titles
+        if day_date_parsed:
+            d, m, y = day_date_parsed
+            day_date_str = f"{d:02d}.{m:02d}.{y % 100:02d}"
+        else:
+            day_date_str = None
 
         # Segments (interviews/arguments)
         segment_pattern = re.compile(
@@ -331,7 +338,10 @@ def extract_items_from_page(page_html: str):
 
         day_full = None
         for href, full_content in full_shows:
-            title_m = re.search(r'<div dir="rtl">(התוכנית המלאה\s+[\d.]+)</div>', full_content)
+            # Match only the DD.MM.YY format; when 103FM uses Hebrew month
+            # names (e.g. "3 באוגוסט 2026" for today's open day) we fall
+            # back to day_date_str to keep titles consistent.
+            title_m = re.search(r'<div dir="rtl">(התוכנית המלאה\s+\d{1,2}\.\d{1,2}\.\d{2,4})</div>', full_content)
             if title_m:
                 base_title = clean_text(title_m.group(1))
             elif day_date_str:

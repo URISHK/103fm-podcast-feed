@@ -1,19 +1,18 @@
 #!/usr/bin/env python3
 """
-103FM Podcast Feed Generator - v0.11
+103FM Podcast Feed Generator - v0.12
 
-Changes from v0.10:
-  - Speaker extraction now truncates the description at the first ':'
-    before applying role patterns. Beyond the colon is the quoted content
-    of what was said, not who said it — role words like 'אלוף' appearing
-    inside a quote were being incorrectly matched as military ranks.
-  - Anchored military-rank patterns to ^ of the meta portion.
-  - Tightened role+name patterns (ח"כ, שר, ד"ר, וכו') to require at least
-    two Hebrew words for the name, preventing single-word false matches
-    like 'הביטחון' being captured as a person's name after 'שר'.
+Changes from v0.11:
+  - Self-host the show cover image. Each run downloads the 103FM cover
+    JPG to the repo (as cover.jpg) and the feed points to it via
+    feed.urik.uk/cover.jpg instead of the original 103fm URL. Pocket
+    Casts and other podcast clients cache original hotlinked images
+    aggressively; giving them a new URL under our own domain forces
+    a fresh fetch, and also protects against 103FM adding hotlink
+    protection in the future.
 
-v0.10:
-  - Critical day-date alignment fix (segment_date_txt as primary source).
+v0.11:
+  - Speaker extraction: truncate at first ':' + tightened role patterns.
 """
 
 import os
@@ -49,7 +48,12 @@ FEED_DESCRIPTION = "התוכנית של ינון מגל ובן כספית ברד
 FEED_LINK = PROGRAM_URL
 FEED_LANGUAGE = "he"
 FEED_AUTHOR = "103FM"
-FEED_IMAGE = "https://103fm.maariv.co.il/download/programs/imgNewTop_262.jpg"
+# Cover image: downloaded from 103FM (below) and served from our own domain
+# so podcast clients see it under our URL (bypasses their cache of the old
+# 103fm-hotlinked image, and shields us from potential hotlink protection).
+FEED_IMAGE = "https://feed.urik.uk/cover.jpg"
+IMAGE_SOURCE_URL = "https://103fm.maariv.co.il/download/programs/imgNewTop_262.jpg"
+IMAGE_LOCAL_FILE = "cover.jpg"
 
 TZ_IL = timezone(timedelta(hours=3))
 
@@ -67,6 +71,25 @@ def head(url: str):
             return r.status, int(length) if length else 0
     except Exception:
         return None, 0
+
+# ---------- Cover image download ----------
+def download_cover_image():
+    """
+    Download the show cover image from 103FM to the local repo.
+    Written every run; git will only commit if content changed.
+    Failures are non-fatal — the feed still works without a fresh image.
+    """
+    try:
+        req = urllib.request.Request(IMAGE_SOURCE_URL, headers={"User-Agent": USER_AGENT})
+        with urllib.request.urlopen(req, timeout=30) as r:
+            data = r.read()
+        if len(data) < 100:
+            print(f"  Cover image download suspiciously small ({len(data)} bytes) — skipping save", file=sys.stderr)
+            return
+        Path(IMAGE_LOCAL_FILE).write_bytes(data)
+        print(f"  Cover image saved: {IMAGE_LOCAL_FILE} ({len(data)} bytes)", file=sys.stderr)
+    except Exception as e:
+        print(f"  Cover image download failed (non-fatal): {e}", file=sys.stderr)
 
 # ---------- Safety cap ----------
 def count_commits_this_month() -> int:
@@ -454,66 +477,4 @@ def build_rss(items) -> str:
     <description>{escape_xml(FEED_DESCRIPTION)}</description>
     <language>{FEED_LANGUAGE}</language>
     <lastBuildDate>{build_date_str}</lastBuildDate>
-    <itunes:author>{escape_xml(FEED_AUTHOR)}</itunes:author>
-    <itunes:summary>{escape_xml(FEED_DESCRIPTION)}</itunes:summary>
-    <itunes:explicit>false</itunes:explicit>
-    <itunes:category text="News"/>
-    <itunes:image href="{escape_xml(FEED_IMAGE)}"/>
-    <image>
-      <url>{escape_xml(FEED_IMAGE)}</url>
-      <title>{escape_xml(FEED_TITLE)}</title>
-      <link>{escape_xml(FEED_LINK)}</link>
-    </image>
-{chr(10).join(items_xml)}
-  </channel>
-</rss>
-"""
-
-# ---------- Main ----------
-def main():
-    # Safety cap - halt if we've exceeded the monthly commit budget
-    if FORCE_RUN:
-        print("FORCE_RUN=true: skipping safety cap check", file=sys.stderr)
-    else:
-        commits = count_commits_this_month()
-        print(f"Safety check: {commits}/{MAX_COMMITS_PER_MONTH} commits to feed this month", file=sys.stderr)
-        if commits >= MAX_COMMITS_PER_MONTH:
-            print(f"HALTING: monthly commit cap reached ({commits} >= {MAX_COMMITS_PER_MONTH}).", file=sys.stderr)
-            print(f"To override for one run, trigger workflow_dispatch with force=true.", file=sys.stderr)
-            sys.exit(0)
-
-    print(f"Fetching program page: {PROGRAM_URL}", file=sys.stderr)
-    page_html = fetch(PROGRAM_URL)
-
-    print("Extracting items...", file=sys.stderr)
-    items = extract_items_from_page(page_html)
-    if not items:
-        print("ERROR: No items found. HTML structure may have changed.", file=sys.stderr)
-        sys.exit(1)
-    print(f"Total items extracted: {len(items)}", file=sys.stderr)
-
-    print(f"Fetching data-file for each item ({CONCURRENT_REQUESTS} workers parallel)...", file=sys.stderr)
-    with ThreadPoolExecutor(max_workers=CONCURRENT_REQUESTS) as ex:
-        futures = [ex.submit(fetch_data_file, item) for item in items]
-        for _ in as_completed(futures):
-            pass
-
-    print("Fetching file sizes...", file=sys.stderr)
-    with ThreadPoolExecutor(max_workers=CONCURRENT_REQUESTS) as ex:
-        futures = [ex.submit(fetch_size, item) for item in items]
-        for _ in as_completed(futures):
-            pass
-
-    valid = [i for i in items if i.get("data_file") and i.get("size")]
-    print(f"Valid items: {len(valid)}/{len(items)}", file=sys.stderr)
-
-    if not valid:
-        print("ERROR: No valid items to include in feed.", file=sys.stderr)
-        sys.exit(1)
-
-    rss_xml = build_rss(items)
-    Path(OUTPUT_FILE).write_text(rss_xml, encoding="utf-8")
-    print(f"Written: {OUTPUT_FILE} ({len(rss_xml)} bytes, {len(valid)} items)", file=sys.stderr)
-
-if __name__ == "__main__":
-    main()
+    <itunes:aut

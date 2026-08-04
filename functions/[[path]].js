@@ -1,9 +1,14 @@
 // Cloudflare Pages Function - intercepts ALL requests to the site.
-// Access is granted only if filename matches, token matches, AND user-agent
-// looks like a podcast client. Any other request gets a 404.
-// This makes the site look completely empty to random visitors.
+//
+// Access rules:
+//   - cover.jpg is served publicly (no auth). Podcast clients need to
+//     fetch the cover image without any secret token.
+//   - The feed (pkfsfm9xqbhxbxkc.xml) requires the correct ?k= token
+//     AND a User-Agent that looks like a podcast client.
+//   - Anything else returns 404 (site looks empty to random visitors).
 
 const FEED_FILENAME = "pkfsfm9xqbhxbxkc.xml";
+const IMAGE_FILENAME = "cover.jpg";
 const EXPECTED_TOKEN = "ElL7FrjYfFDJ2WI4pKLazx4z2OUO2hTL";
 
 const ALLOWED_UA_SUBSTRINGS = [
@@ -38,18 +43,22 @@ export async function onRequest(context) {
   const url = new URL(request.url);
   const path = url.pathname.replace(/^\/+/, "");
 
-  // Wrong path
+  // Public: cover image (must be reachable without a token so podcast
+  // clients can render the podcast artwork).
+  if (path === IMAGE_FILENAME) {
+    return next();
+  }
+
+  // Feed: requires exact filename + token + podcast-client User-Agent.
   if (path !== FEED_FILENAME) {
     return new Response("Not Found", { status: 404 });
   }
 
-  // Wrong token
   const token = url.searchParams.get("k");
   if (token !== EXPECTED_TOKEN) {
     return new Response("Not Found", { status: 404 });
   }
 
-  // Not a podcast client
   const ua = request.headers.get("user-agent") || "";
   if (!isPodcastClient(ua)) {
     return new Response("Not Found", { status: 404 });

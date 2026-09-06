@@ -2,9 +2,9 @@ name: Update Podcast Feed
 
 on:
   schedule:
-    # Sunday-Thursday at 10:00 UTC.
-    # In Israel summer time (UTC+3) = 13:00, winter (UTC+2) = 12:00.
-    # Show ends 11:00 IL time, so this leaves ample buffer for episode upload.
+    # Sunday-Thursday at 10:00 UTC (13:00 IL summer / 12:00 IL winter).
+    # This is the GitHub-side cron. A Cloudflare Worker also triggers at the
+    # same time as backup — see podcast-workflow-trigger Worker.
     - cron: '0 10 * * 0-4'
   workflow_dispatch:
     inputs:
@@ -16,14 +16,30 @@ on:
 permissions:
   contents: write
 
+# Only one instance of this workflow may run at a time. If a second run is
+# triggered while one is in progress (e.g. GitHub cron + Cloudflare Worker
+# firing near-simultaneously), the new run waits. If a THIRD queues while the
+# second is still waiting, the second gets superseded by the third — so at
+# most 2 runs ever happen: the currently-running one, and the latest queued.
+# Prevents git-push races.
+concurrency:
+  group: podcast-feed-update
+  cancel-in-progress: false
+
 jobs:
   update-feed:
     runs-on: ubuntu-latest
+    # Normal runs take 15-30 seconds. 10 minutes leaves generous headroom for
+    # network hiccups on 103FM's side, but fails fast if anything truly hangs —
+    # rather than blocking future queued runs for the default 6-hour limit.
+    timeout-minutes: 10
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # Full git history required for the safety cap's commit count
+          # Enough history for the scraper's monthly commit-cap check (~30-60
+          # commits/month worst case). Faster than fetch-depth: 0 (full history).
+          fetch-depth: 100
 
       - name: Setup Python
         uses: actions/setup-python@v5

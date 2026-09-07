@@ -8,7 +8,7 @@
     <link>https://103fm.maariv.co.il/program/%D7%99%D7%A0%D7%95%D7%9F-%D7%9E%D7%92%D7%9C-%D7%91%D7%9F-%D7%9B%D7%A1%D7%A4%D7%99%D7%AA.aspx</link>
     <description>התוכנית של ינון מגל ובן כספית ברדיו 103FM — כולל ראיונות, ריבים ותוכניות מלאות. פיד אישי.</description>
     <language>he</language>
-    <lastBuildDate>Mon, 07 Sep 2026 07:30:28 +0000</lastBuildDate>
+    <lastBuildDate>Mon, 07 Sep 2026 08:00:31 +0000</lastBuildDate>
     <itunes:author>103FM</itunes:author>
     <itunes:summary>התוכנית של ינון מגל ובן כספית ברדיו 103FM — כולל ראיונות, ריבים ותוכניות מלאות. פיד אישי.</itunes:summary>
     <itunes:explicit>false</itunes:explicit>
@@ -35,6 +35,33 @@
       <enclosure url="https://awaod01.streamgates.net/103fm_aw/mag0709262.mp3" length="13636754" type="audio/mpeg"/>
       <guid isPermaLink="false">mag0709262</guid>
       <pubDate>Mon, 07 Sep 2026 12:58:00 +0300</pubDate>
+      <itunes:explicit>false</itunes:explicit>
+    </item>
+    <item>
+      <title>💬 ינון מגל &quot;יאיר גולן חושב שהמדינה צריכה לעודד יציאה בשאלה של דתיים&quot;</title>
+      <link>https://103fm.maariv.co.il/programs/media.aspx?ZrqvnVq=KHEHGH&amp;c41t4nzVQ=FJF</link>
+      <description>ינון מגל בביקורת על יו&#x27;&#x27;ר &#x27;הדמוקרטים&#x27; יאיר גולן: &quot;הוא רוצה לעשות פרויקט לחילון הדתיים? מה האירוע?&quot; • מה השיב בן כספית?</description>
+      <enclosure url="https://awaod01.streamgates.net/103fm_aw/mag0709263.mp3" length="24244558" type="audio/mpeg"/>
+      <guid isPermaLink="false">mag0709263</guid>
+      <pubDate>Mon, 07 Sep 2026 12:57:00 +0300</pubDate>
+      <itunes:explicit>false</itunes:explicit>
+    </item>
+    <item>
+      <title>🎙️ בן חורין &quot;5 נשים ב-10 המקומות הראשונים&quot;</title>
+      <link>https://103fm.maariv.co.il/programs/media.aspx?ZrqvnVq=KHEHGG&amp;c41t4nzVQ=FJF</link>
+      <description>לירן אבישר בן חורין (ביחד), לשעבר מנכ&#x27;&#x27;לית משרד התקשורת, לאחר פרסום הרשימה: &quot;נשים שיודעות לעבוד, בשורה מעניינת לישראל אחרי 4 השנים האחרונות&quot;</description>
+      <enclosure url="https://awaod01.streamgates.net/103fm_aw/mag0709264.mp3" length="10735700" type="audio/mpeg"/>
+      <guid isPermaLink="false">mag0709264</guid>
+      <pubDate>Mon, 07 Sep 2026 12:56:00 +0300</pubDate>
+      <itunes:explicit>false</itunes:explicit>
+    </item>
+    <item>
+      <title>📻 התוכנית המלאה 07.09.26</title>
+      <link>https://103fm.maariv.co.il/programs/media.aspx?ZrqvnVq=KHEHFM&amp;c41t4nzVQ=FJF</link>
+      <description>התוכנית המלאה 07.09.26</description>
+      <enclosure url="https://awaod01.streamgates.net/103fm_aw/mag07092699.mp3" length="71599334" type="audio/mpeg"/>
+      <guid isPermaLink="false">mag07092699</guid>
+      <pubDate>Mon, 07 Sep 2026 13:00:00 +0300</pubDate>
       <itunes:explicit>false</itunes:explicit>
     </item>
     <item>
